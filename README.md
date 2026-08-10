@@ -2,7 +2,7 @@
 
 **Proof-of-Concept — Nishil Patel**
 
-> **Live interactive demo →** *(deploy to GitHub Pages and paste URL here)*  
+> **Live interactive demo →** [https://shortowl.github.io/Lazy-File-system-with-Content-addressable-storage/](https://shortowl.github.io/Lazy-File-system-with-Content-addressable-storage/)  
 > **Deep-dive design doc →** [`design.md`](./design.md)
 
 ---
