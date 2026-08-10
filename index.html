@@ -1,0 +1,1338 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Lazy-Loading Content-Addressed Container Filesystem</title>
+  <meta name="description" content="A proof-of-concept demo of a lazy-loading, content-addressed container filesystem — starts in milliseconds, downloads only what the app needs.">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Playfair+Display:wght@700&family=Source+Sans+3:wght@400;600&family=Fira+Code:wght@400;500&display=swap" rel="stylesheet">
+  <style>
+    /* ===================================================================
+   EMBER STUDIO DESIGN SYSTEM
+   Warm, craft-focused light theme — terracotta CTAs, amber accents.
+   Color language: terracotta = action/active, green = success/fetched,
+   amber = warning/attention, stone = muted/metadata.
+   =================================================================== */
+
+    :root {
+      /* Backgrounds */
+      --bg-primary:    #FAFAF9;
+      --bg-secondary:  #F5F5F4;
+      --bg-tertiary:   #E7E5E4;
+      --bg-card:       #F5F5F4;
+      /* Borders */
+      --border:        #D6D3D1;
+      --border-accent: #A8A29E;
+      /* Text */
+      --text-primary:  #1C1917;
+      --text-secondary:#57534E;
+      --text-muted:    #78716C;
+      /* Brand */
+      --primary:       #C2410C;
+      --primary-hover: #9A3412;
+      --accent:        #F59E0B;
+      /* Semantic */
+      --green:         #16A34A;
+      --green-dim:     #15803D;
+      --green-glow:    rgba(22, 163, 74, 0.10);
+      --warning:       #D97706;
+      --error:         #DC2626;
+      --blue:          #2563EB;
+      --blue-dim:      #1D4ED8;
+      --purple:        #7C3AED;
+      --cyan:          #0891B2;
+      --yellow:        #D97706;
+      --orange:        #EA580C;
+      /* Typography */
+      --serif:  'Playfair Display', Georgia, serif;
+      --sans:   'Source Sans 3', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+      --mono:   'Fira Code', 'Cascadia Code', 'Consolas', monospace;
+      /* Elevation */
+      --shadow-sm:  0 1px 3px rgba(28,25,23,0.06);
+      --shadow-md:  0 4px 16px rgba(28,25,23,0.08);
+      --shadow-lg:  0 24px 48px rgba(28,25,23,0.12);
+      --glow-primary: 0 4px 12px rgba(194,65,12,0.25);
+    }
+
+    * {
+      margin: 0;
+      padding: 0;
+      box-sizing: border-box;
+    }
+
+    body {
+      font-family: var(--sans);
+      background: var(--bg-primary);
+      color: var(--text-primary);
+      min-height: 100vh;
+      -webkit-font-smoothing: antialiased;
+      font-size: 16px;
+    }
+
+    /* ===================================================================
+   HEADER
+   =================================================================== */
+
+    .header {
+      padding: 20px 32px 0;
+      border-bottom: 1px solid var(--border);
+      background: var(--bg-primary);
+      backdrop-filter: blur(8px);
+    }
+
+    .header h1 {
+      font-family: var(--serif);
+      font-size: 22px;
+      font-weight: 700;
+      letter-spacing: -0.02em;
+      margin-bottom: 4px;
+      color: var(--text-primary);
+    }
+
+    .header h1 .accent {
+      color: var(--primary);
+    }
+
+    .header .subtitle {
+      font-size: 13px;
+      color: var(--text-muted);
+      margin-bottom: 16px;
+      font-family: var(--sans);
+      font-weight: 400;
+    }
+
+    /* ===================================================================
+   TAB BAR
+   =================================================================== */
+
+    .tabs {
+      display: flex;
+      gap: 0;
+    }
+
+    .tab-btn {
+      background: none;
+      border: none;
+      color: var(--text-muted);
+      font-family: var(--sans);
+      font-size: 14px;
+      font-weight: 600;
+      padding: 10px 20px;
+      cursor: pointer;
+      border-bottom: 2px solid transparent;
+      transition: color 0.15s, border-color 0.15s, background 0.15s;
+      border-radius: 6px 6px 0 0;
+    }
+
+    .tab-btn:hover {
+      color: var(--text-secondary);
+      background: var(--bg-secondary);
+    }
+
+    .tab-btn.active {
+      color: var(--primary);
+      border-bottom-color: var(--primary);
+    }
+
+    /* ===================================================================
+   TAB CONTENT
+   =================================================================== */
+
+    .tab-content {
+      display: none;
+      padding: 32px;
+    }
+
+    .tab-content.active {
+      display: block;
+    }
+
+    /* ===================================================================
+   DEMO LAYOUT
+   =================================================================== */
+
+    .demo-layout {
+      display: grid;
+      grid-template-columns: 280px 1fr;
+      gap: 24px;
+      min-height: 500px;
+    }
+
+    /* --- File tree panel --- */
+    .file-tree-panel {
+      background: var(--bg-card);
+      border: 1px solid var(--border);
+      border-radius: 12px;
+      overflow: hidden;
+      box-shadow: var(--shadow-sm);
+    }
+
+    .file-tree-header {
+      padding: 12px 16px;
+      background: var(--bg-tertiary);
+      border-bottom: 1px solid var(--border);
+      font-family: var(--sans);
+      font-size: 12px;
+      font-weight: 600;
+      color: var(--text-secondary);
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      letter-spacing: 0.05em;
+      text-transform: uppercase;
+    }
+
+    .file-tree-header .icon { font-size: 14px; }
+
+    .file-tree {
+      padding: 8px 0;
+      font-family: var(--mono);
+      font-size: 11px;
+      max-height: 480px;
+      overflow-y: auto;
+    }
+
+    .file-tree::-webkit-scrollbar { width: 4px; }
+    .file-tree::-webkit-scrollbar-track { background: transparent; }
+    .file-tree::-webkit-scrollbar-thumb {
+      background: var(--border);
+      border-radius: 9999px;
+    }
+
+    .tree-group { margin-bottom: 4px; }
+
+    .tree-group-label {
+      padding: 4px 14px;
+      color: var(--text-muted);
+      font-size: 10px;
+      text-transform: uppercase;
+      letter-spacing: 0.08em;
+      cursor: default;
+    }
+
+    .tree-item {
+      padding: 2px 14px 2px 22px;
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      transition: background 0.15s, color 0.3s;
+      color: var(--text-muted);
+      cursor: default;
+      line-height: 1.6;
+    }
+
+    .tree-item .file-icon {
+      flex-shrink: 0;
+      width: 8px;
+      height: 8px;
+      border-radius: 2px;
+      background: var(--border);
+      transition: background 0.3s, box-shadow 0.3s;
+    }
+
+    .tree-item .file-name {
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+
+    /* File states */
+    .tree-item.hot { color: var(--text-secondary); }
+    .tree-item.hot .file-icon {
+      background: var(--accent);
+      box-shadow: 0 0 4px rgba(245,158,11,0.4);
+    }
+
+    .tree-item.fetched { color: var(--green); }
+    .tree-item.fetched .file-icon {
+      background: var(--green);
+      box-shadow: 0 0 6px rgba(22,163,74,0.35);
+    }
+
+    .tree-item.cold {
+      color: var(--text-muted);
+      opacity: 0.5;
+    }
+
+    /* --- Right side: controls & stats --- */
+    .demo-right {
+      display: flex;
+      flex-direction: column;
+      gap: 18px;
+    }
+
+    /* Button row */
+    .btn-row {
+      display: flex;
+      gap: 10px;
+      flex-wrap: wrap;
+      align-items: center;
+    }
+
+    .demo-btn {
+      font-family: var(--sans);
+      font-size: 14px;
+      font-weight: 600;
+      padding: 10px 20px;
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      cursor: pointer;
+      transition: all 0.15s;
+      background: var(--bg-secondary);
+      color: var(--text-primary);
+      position: relative;
+      overflow: hidden;
+    }
+
+    .demo-btn:hover:not(:disabled) {
+      border-color: var(--border-accent);
+      background: var(--bg-tertiary);
+      transform: translateY(-1px);
+      box-shadow: var(--shadow-sm);
+    }
+
+    .demo-btn:active:not(:disabled) { transform: translateY(0); }
+    .demo-btn:disabled { opacity: 0.4; cursor: not-allowed; }
+
+    .demo-btn .btn-num {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      width: 18px;
+      height: 18px;
+      border-radius: 4px;
+      font-size: 10px;
+      font-weight: 700;
+      margin-right: 6px;
+      background: rgba(120,113,108,0.15);
+      color: var(--text-muted);
+    }
+
+    /* Eager = primary terracotta */
+    .demo-btn.eager {
+      background: var(--primary);
+      color: #fff;
+      border-color: var(--primary);
+    }
+    .demo-btn.eager:hover:not(:disabled) {
+      background: var(--primary-hover);
+      border-color: var(--primary-hover);
+      box-shadow: var(--glow-primary);
+    }
+    .demo-btn.eager .btn-num {
+      background: rgba(255,255,255,0.2);
+      color: #fff;
+    }
+
+    /* Lazy = secondary (outline terracotta) */
+    .demo-btn.lazy {
+      background: #fff;
+      color: var(--primary);
+      border-color: var(--primary);
+    }
+    .demo-btn.lazy:hover:not(:disabled) {
+      background: rgba(194,65,12,0.05);
+      box-shadow: var(--glow-primary);
+    }
+    .demo-btn.lazy .btn-num {
+      background: rgba(194,65,12,0.12);
+      color: var(--primary);
+    }
+
+    /* Warm = ghost stone */
+    .demo-btn.warm {
+      background: var(--bg-secondary);
+      color: var(--text-secondary);
+    }
+    .demo-btn.warm .btn-num {
+      background: rgba(120,113,108,0.12);
+      color: var(--text-muted);
+    }
+
+    /* Running highlight rings */
+    .demo-btn.eager.running  { box-shadow: var(--glow-primary); }
+    .demo-btn.lazy.running   { box-shadow: 0 0 12px rgba(22,163,74,0.2); }
+    .demo-btn.warm.running   { box-shadow: 0 0 12px rgba(245,158,11,0.2); }
+
+    .reset-btn {
+      margin-left: auto;
+      font-size: 13px;
+      font-family: var(--sans);
+      padding: 8px 14px;
+      background: transparent;
+      border: 1px solid var(--border);
+      color: var(--text-muted);
+      border-radius: 8px;
+      cursor: pointer;
+      transition: all 0.15s;
+    }
+    .reset-btn:hover {
+      border-color: var(--error);
+      color: var(--error);
+    }
+
+    /* Network activity bar */
+    .network-bar-container {
+      background: var(--bg-card);
+      border: 1px solid var(--border);
+      border-radius: 12px;
+      padding: 14px 18px;
+      box-shadow: var(--shadow-sm);
+    }
+
+    .network-bar-label {
+      font-size: 11px;
+      font-weight: 600;
+      color: var(--text-muted);
+      text-transform: uppercase;
+      letter-spacing: 0.08em;
+      margin-bottom: 10px;
+      display: flex;
+      align-items: center;
+      gap: 6px;
+    }
+
+    .network-bar-label .pulse-dot {
+      width: 6px;
+      height: 6px;
+      border-radius: 9999px;
+      background: var(--border-accent);
+      transition: background 0.3s;
+    }
+
+    .network-bar-label .pulse-dot.active {
+      background: var(--green);
+      animation: pulse 0.8s ease-in-out infinite;
+    }
+
+    @keyframes pulse {
+      0%, 100% { opacity: 1; box-shadow: 0 0 0 0 rgba(22,163,74,0.4); }
+      50%       { opacity: 0.7; box-shadow: 0 0 0 4px rgba(22,163,74,0); }
+    }
+
+    .network-bar-track {
+      height: 6px;
+      background: var(--bg-tertiary);
+      border-radius: 9999px;
+      overflow: hidden;
+    }
+
+    .network-bar-fill {
+      height: 100%;
+      width: 0%;
+      border-radius: 9999px;
+      background: linear-gradient(90deg, var(--green-dim), var(--green));
+      transition: width 0.1s linear;
+      position: relative;
+    }
+
+    .network-bar-fill.eager-fill {
+      background: linear-gradient(90deg, var(--error), var(--orange));
+    }
+
+    .network-bar-fill::after {
+      content: '';
+      position: absolute;
+      right: 0; top: 0; bottom: 0;
+      width: 20px;
+      background: linear-gradient(90deg, transparent, rgba(255,255,255,0.3));
+      border-radius: 9999px;
+    }
+
+    /* Stats panel */
+    .stats-panel {
+      background: var(--bg-card);
+      border: 1px solid var(--border);
+      border-radius: 12px;
+      overflow: hidden;
+      box-shadow: var(--shadow-sm);
+    }
+
+    .stats-header {
+      padding: 12px 18px;
+      background: var(--bg-tertiary);
+      border-bottom: 1px solid var(--border);
+      font-family: var(--sans);
+      font-size: 12px;
+      font-weight: 600;
+      color: var(--text-secondary);
+      letter-spacing: 0.05em;
+      text-transform: uppercase;
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+
+    .stats-grid {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+    }
+
+    .stat-cell {
+      padding: 16px 18px;
+      border-bottom: 1px solid var(--border);
+      border-right: 1px solid var(--border);
+    }
+    .stat-cell:nth-child(even)       { border-right: none; }
+    .stat-cell:nth-last-child(-n+2)  { border-bottom: none; }
+
+    .stat-label {
+      font-size: 11px;
+      color: var(--text-muted);
+      text-transform: uppercase;
+      letter-spacing: 0.06em;
+      margin-bottom: 6px;
+      font-weight: 600;
+    }
+
+    .stat-value {
+      font-family: var(--mono);
+      font-size: 24px;
+      font-weight: 500;
+      color: var(--text-primary);
+      transition: color 0.3s;
+      letter-spacing: -0.5px;
+    }
+
+    .stat-value .unit {
+      font-size: 13px;
+      font-weight: 400;
+      color: var(--text-secondary);
+      margin-left: 2px;
+    }
+
+    /* Comparison callout badge */
+    .callout {
+      margin: 0;
+      padding: 14px 18px;
+      background: var(--green-glow);
+      border: 1px solid rgba(22,163,74,0.25);
+      border-radius: 8px;
+      font-size: 14px;
+      font-weight: 600;
+      color: var(--green);
+      display: none;
+      align-items: center;
+      gap: 8px;
+      animation: fadeSlideIn 0.4s ease-out;
+    }
+
+    .callout.visible { display: flex; }
+
+    .callout.cache-callout {
+      background: rgba(245,158,11,0.08);
+      border-color: rgba(245,158,11,0.25);
+      color: var(--warning);
+    }
+
+    .callout .callout-icon { font-size: 18px; flex-shrink: 0; }
+
+    @keyframes fadeSlideIn {
+      from { opacity: 0; transform: translateY(6px); }
+      to   { opacity: 1; transform: translateY(0); }
+    }
+
+    /* Cross-image dedup panel */
+    .dedup-panel {
+      background: var(--bg-card);
+      border: 1px solid var(--border);
+      border-radius: 12px;
+      padding: 14px 18px;
+      display: none;
+      align-items: flex-start;
+      gap: 10px;
+      font-size: 13px;
+      color: var(--text-secondary);
+      animation: fadeSlideIn 0.5s ease-out;
+      box-shadow: var(--shadow-sm);
+    }
+    .dedup-panel.visible { display: flex; }
+    .dedup-panel .dedup-icon { font-size: 20px; flex-shrink: 0; margin-top: 1px; }
+    .dedup-panel .dedup-text strong { color: var(--primary); }
+    .dedup-panel .dedup-text .dedup-highlight {
+      font-family: var(--mono);
+      font-size: 12px;
+      color: var(--green);
+    }
+
+    /* ===================================================================
+   HIGHLIGHT STATES
+   =================================================================== */
+    .stat-value.highlight-green { color: var(--green); }
+    .stat-value.highlight-blue  { color: var(--blue); }
+    .stat-value.highlight-red   { color: var(--error); }
+
+    /* ===================================================================
+   UTILITY ANIMATIONS
+   =================================================================== */
+    .tree-item.fetching { animation: fetchPulse 0.3s ease-out; }
+    @keyframes fetchPulse {
+      0%   { background: rgba(22,163,74,0.12); }
+      100% { background: transparent; }
+    }
+
+    /* ===================================================================
+   RESPONSIVE
+   =================================================================== */
+    @media (max-width: 780px) {
+      .demo-layout { grid-template-columns: 1fr; }
+      .file-tree { max-height: 200px; }
+    }
+
+    @media (max-width: 860px) {
+      .hld-pillars { grid-template-columns: 1fr; }
+    }
+  </style>
+</head>
+
+<body>
+
+  <!-- ================================================================
+     HEADER + TAB BAR
+     ================================================================ -->
+  <div class="header">
+    <h1>Lazy-Loading <span class="accent">Content-Addressed</span> Container Filesystem</h1>
+    <p class="subtitle">Nishil Patel &middot; Proof-of-Concept Demo</p>
+    <div class="tabs">
+      <button class="tab-btn active" onclick="switchTab('architecture')">Architecture</button>
+      <button class="tab-btn" onclick="switchTab('demo')">Live Demo</button>
+    </div>
+  </div>
+
+  <!-- ================================================================
+     TAB 1: ARCHITECTURE
+     ================================================================ -->
+  <div id="tab-architecture" class="tab-content active">
+    <div style="max-width: 900px; margin: 0 auto; text-align: center;">
+      
+      <svg viewBox="0 0 1000 520" xmlns="http://www.w3.org/2000/svg" style="width:100%; height:auto;">
+        <defs>
+          <!-- Ember Studio arrow markers -->
+          <marker id="arrowSolid" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
+            <path d="M 0 0 L 10 5 L 0 10 z" fill="#C2410C" />
+          </marker>
+          <marker id="arrowDashed" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
+            <path d="M 0 0 L 10 5 L 0 10 z" fill="#78716C" />
+          </marker>
+
+          <!-- Warm drop shadow for nodes -->
+          <filter id="glow" x="-20%" y="-20%" width="140%" height="140%">
+            <feDropShadow dx="0" dy="4" stdDeviation="6" flood-color="#1C1917" flood-opacity="0.06"/>
+          </filter>
+
+          <!-- Zone Gradients (warm tints) -->
+          <linearGradient id="gradContainer" x1="0%" y1="0%" x2="0%" y2="100%">
+            <stop offset="0%" stop-color="#C2410C" stop-opacity="0.06"/>
+            <stop offset="100%" stop-color="#F5F5F4" stop-opacity="1"/>
+          </linearGradient>
+          <linearGradient id="gradWorker" x1="0%" y1="0%" x2="0%" y2="100%">
+            <stop offset="0%" stop-color="#16A34A" stop-opacity="0.06"/>
+            <stop offset="100%" stop-color="#F5F5F4" stop-opacity="1"/>
+          </linearGradient>
+          <linearGradient id="gradCloud" x1="0%" y1="0%" x2="0%" y2="100%">
+            <stop offset="0%" stop-color="#2563EB" stop-opacity="0.06"/>
+            <stop offset="100%" stop-color="#F5F5F4" stop-opacity="1"/>
+          </linearGradient>
+
+          <!-- Node box gradient (warm white) -->
+          <linearGradient id="nodeGrad" x1="0%" y1="0%" x2="0%" y2="100%">
+            <stop offset="0%" stop-color="#FFFFFF" stop-opacity="1"/>
+            <stop offset="100%" stop-color="#F5F5F4" stop-opacity="1"/>
+          </linearGradient>
+        </defs>
+
+        <!-- Zone Backgrounds — warm tinted panels -->
+        <!-- 1. Container Runtime -->
+        <rect x="20" y="60" width="280" height="380" fill="url(#gradContainer)" stroke="#C2410C" stroke-width="1" stroke-opacity="0.25" rx="12" />
+        <rect x="90" y="50" width="140" height="20" fill="#FFF7ED" stroke="#C2410C" stroke-width="1" stroke-opacity="0.4" rx="10" />
+        <text x="160" y="64" fill="#C2410C" font-family="sans-serif" font-size="11" font-weight="bold" letter-spacing="1" text-anchor="middle">1. CONTAINER RUNTIME</text>
+
+        <!-- 2. Worker Node -->
+        <rect x="340" y="60" width="320" height="380" fill="url(#gradWorker)" stroke="#16A34A" stroke-width="1" stroke-opacity="0.25" rx="12" />
+        <rect x="430" y="50" width="140" height="20" fill="#F0FDF4" stroke="#16A34A" stroke-width="1" stroke-opacity="0.4" rx="10" />
+        <text x="500" y="64" fill="#16A34A" font-family="sans-serif" font-size="11" font-weight="bold" letter-spacing="1" text-anchor="middle">2. WORKER NODE</text>
+
+        <!-- 3. Cloud Storage -->
+        <rect x="700" y="60" width="280" height="380" fill="url(#gradCloud)" stroke="#2563EB" stroke-width="1" stroke-opacity="0.25" rx="12" />
+        <rect x="770" y="50" width="140" height="20" fill="#EFF6FF" stroke="#2563EB" stroke-width="1" stroke-opacity="0.4" rx="10" />
+        <text x="840" y="64" fill="#2563EB" font-family="sans-serif" font-size="11" font-weight="bold" letter-spacing="1" text-anchor="middle">3. CLOUD STORAGE</text>
+
+        <!-- Container Zone Boxes -->
+        <rect x="40" y="110" width="240" height="90" fill="url(#nodeGrad)" stroke="#D6D3D1" stroke-width="1" rx="12" filter="url(#glow)" />
+        <circle cx="160" cy="140" r="16" fill="rgba(194,65,12,0.10)" />
+        <text x="160" y="145" font-size="16" text-anchor="middle">📦</text>
+        <text x="160" y="170" fill="#1C1917" font-family="sans-serif" font-size="15" font-weight="bold" text-anchor="middle">Your App</text>
+        <text x="160" y="188" fill="#78716C" font-family="sans-serif" font-size="12" text-anchor="middle">Wants to open and read a file</text>
+
+        <rect x="40" y="290" width="240" height="110" fill="url(#nodeGrad)" stroke="#D6D3D1" stroke-width="1" rx="12" filter="url(#glow)" />
+        <circle cx="160" cy="320" r="16" fill="rgba(234,88,12,0.10)" />
+        <text x="160" y="325" font-size="16" text-anchor="middle">📂</text>
+        <text x="160" y="350" fill="#1C1917" font-family="sans-serif" font-size="15" font-weight="bold" text-anchor="middle">Virtual File Layer</text>
+        <text x="160" y="370" fill="#78716C" font-family="sans-serif" font-size="12" text-anchor="middle">Looks like a normal folder to your app</text>
+        <text x="160" y="388" fill="#78716C" font-family="sans-serif" font-size="12" text-anchor="middle">but silently passes requests through</text>
+
+        <!-- Worker Node Boxes -->
+        <rect x="380" y="170" width="240" height="90" fill="url(#nodeGrad)" stroke="#D6D3D1" stroke-width="1" rx="12" filter="url(#glow)" />
+        <circle cx="500" cy="200" r="16" fill="rgba(22,163,74,0.10)" />
+        <text x="500" y="205" font-size="16" text-anchor="middle">⚡</text>
+        <text x="500" y="230" fill="#1C1917" font-family="sans-serif" font-size="15" font-weight="bold" text-anchor="middle">Smart File Watcher</text>
+        <text x="500" y="248" fill="#78716C" font-family="sans-serif" font-size="12" text-anchor="middle">Intercepts every file request silently</text>
+
+        <rect x="380" y="320" width="240" height="100" fill="url(#nodeGrad)" stroke="#D6D3D1" stroke-width="1" rx="12" filter="url(#glow)" />
+        <circle cx="500" cy="350" r="16" fill="rgba(245,158,11,0.10)" />
+        <text x="500" y="355" font-size="16" text-anchor="middle">💾</text>
+        <text x="500" y="380" fill="#1C1917" font-family="sans-serif" font-size="15" font-weight="bold" text-anchor="middle">Local File Cache</text>
+        <text x="500" y="398" fill="#78716C" font-family="sans-serif" font-size="12" text-anchor="middle">Saves downloaded files on this machine</text>
+        <text x="500" y="414" fill="#78716C" font-family="sans-serif" font-size="12" text-anchor="middle">No need to re-download next time</text>
+
+        <!-- Cloud Storage Boxes -->
+        <rect x="720" y="110" width="240" height="90" fill="url(#nodeGrad)" stroke="#D6D3D1" stroke-width="1" rx="12" filter="url(#glow)" />
+        <circle cx="840" cy="140" r="16" fill="rgba(37,99,235,0.10)" />
+        <text x="840" y="145" font-size="16" text-anchor="middle">📄</text>
+        <text x="840" y="170" fill="#1C1917" font-family="sans-serif" font-size="15" font-weight="bold" text-anchor="middle">File Directory</text>
+        <text x="840" y="188" fill="#78716C" font-family="sans-serif" font-size="12" text-anchor="middle">A tiny list of every file &amp; where it lives</text>
+
+        <rect x="720" y="290" width="240" height="110" fill="url(#nodeGrad)" stroke="#D6D3D1" stroke-width="1" rx="12" filter="url(#glow)" />
+        <circle cx="840" cy="320" r="16" fill="rgba(37,99,235,0.10)" />
+        <text x="840" y="325" font-size="16" text-anchor="middle">☁️</text>
+        <text x="840" y="350" fill="#1C1917" font-family="sans-serif" font-size="15" font-weight="bold" text-anchor="middle">Cloud File Storage</text>
+        <text x="840" y="370" fill="#78716C" font-family="sans-serif" font-size="12" text-anchor="middle">Stores the actual file data in the cloud</text>
+        <text x="840" y="388" fill="#78716C" font-family="sans-serif" font-size="12" text-anchor="middle">Downloaded only once, cached locally</text>
+
+        <!-- Animated Glowing Arrows & Connections -->
+        
+        <!-- App to OverlayFS -->
+        <path d="M 160 205 L 160 280" stroke="#C2410C" stroke-width="2.5" fill="none" stroke-linecap="round" stroke-linejoin="round" marker-end="url(#arrowSolid)" />
+        <path d="M 160 205 L 160 280" stroke="#F59E0B" stroke-width="2.5" fill="none" stroke-dasharray="6,12" opacity="0.5">
+          <animate attributeName="stroke-dashoffset" from="18" to="0" dur="1s" repeatCount="indefinite" />
+        </path>
+        <rect x="125" y="235" width="70" height="20" fill="#FFF7ED" rx="4" />
+        <text x="160" y="249" fill="#C2410C" font-family="monospace" font-size="11" text-anchor="middle">open file</text>
+
+        <!-- OverlayFS to FUSE -->
+        <path d="M 285 345 L 340 345 L 340 215 L 370 215" stroke="#C2410C" stroke-width="2.5" fill="none" stroke-linecap="round" stroke-linejoin="round" marker-end="url(#arrowSolid)" />
+        <path d="M 285 345 L 340 345 L 340 215 L 370 215" stroke="#F59E0B" stroke-width="2.5" fill="none" stroke-dasharray="6,12" opacity="0.5">
+          <animate attributeName="stroke-dashoffset" from="18" to="0" dur="1s" repeatCount="indefinite" />
+        </path>
+        <rect x="295" y="270" width="90" height="20" fill="#FFF7ED" rx="4" />
+        <text x="340" y="284" fill="#C2410C" font-family="monospace" font-size="11" text-anchor="middle">intercepted!</text>
+
+        <!-- FUSE to Cache -->
+        <path d="M 500 265 L 500 310" stroke="#C2410C" stroke-width="2.5" fill="none" stroke-linecap="round" stroke-linejoin="round" marker-end="url(#arrowSolid)" />
+        <path d="M 500 265 L 500 310" stroke="#F59E0B" stroke-width="2.5" fill="none" stroke-dasharray="6,12" opacity="0.5">
+          <animate attributeName="stroke-dashoffset" from="18" to="0" dur="1s" repeatCount="indefinite" />
+        </path>
+        <rect x="425" y="278" width="150" height="20" fill="#FFF7ED" rx="4" />
+        <text x="500" y="292" fill="#C2410C" font-family="monospace" font-size="11" text-anchor="middle">in cache?</text>
+
+        <!-- FUSE to Manifest (dashed, muted) -->
+        <path d="M 500 165 L 500 120 L 710 120" stroke="#A8A29E" stroke-width="2" stroke-dasharray="6,6" fill="none" marker-end="url(#arrowDashed)" />
+        <rect x="520" y="110" width="170" height="20" fill="#F5F5F4" rx="4" />
+        <text x="605" y="124" fill="#78716C" font-family="monospace" font-size="11" text-anchor="middle">1. download tiny map (~2KB)</text>
+
+        <!-- Cache to S3 (Cache Miss) -->
+        <path d="M 625 370 L 710 370" stroke="#C2410C" stroke-width="2.5" fill="none" stroke-linecap="round" stroke-linejoin="round" marker-end="url(#arrowSolid)" />
+        <path d="M 625 370 L 710 370" stroke="#F59E0B" stroke-width="2.5" fill="none" stroke-dasharray="6,12" opacity="0.5">
+          <animate attributeName="stroke-dashoffset" from="18" to="0" dur="1s" repeatCount="indefinite" />
+        </path>
+        <rect x="625" y="340" width="130" height="20" fill="#FFF7ED" rx="4" />
+        <text x="690" y="354" fill="#C2410C" font-family="monospace" font-size="11" text-anchor="middle">download missing part</text>
+      </svg>
+
+      <!-- Benefits Footer — Ember Studio cards -->
+      <div style="display: flex; gap: 20px; justify-content: center; margin-top: 24px; text-align: left;">
+        <div style="background: #F0FDF4; border: 1px solid rgba(22,163,74,0.3); border-left: 4px solid #16A34A; padding: 16px 18px; border-radius: 12px; width: 33%; box-shadow: 0 4px 16px rgba(28,25,23,0.06);">
+          <p style="color: #15803D; font-family: 'Source Sans 3', sans-serif; font-weight: 600; margin: 0 0 6px 0; font-size: 14px;">🚀 Instant Boot</p>
+          <p style="color: #57534E; font-family: 'Source Sans 3', sans-serif; font-size: 13px; margin: 0; line-height: 1.5;">Starts in ~10ms by only downloading the tiny manifest index instead of the whole image.</p>
+        </div>
+        <div style="background: #FFF7ED; border: 1px solid rgba(194,65,12,0.3); border-left: 4px solid #C2410C; padding: 16px 18px; border-radius: 12px; width: 33%; box-shadow: 0 4px 16px rgba(28,25,23,0.06);">
+          <p style="color: #9A3412; font-family: 'Source Sans 3', sans-serif; font-weight: 600; margin: 0 0 6px 0; font-size: 14px;">🎯 Lazy Reading</p>
+          <p style="color: #57534E; font-family: 'Source Sans 3', sans-serif; font-size: 13px; margin: 0; line-height: 1.5;">Only fetches data actually accessed by the application. 97% of cold files are never downloaded.</p>
+        </div>
+        <div style="background: #FFFBEB; border: 1px solid rgba(245,158,11,0.3); border-left: 4px solid #F59E0B; padding: 16px 18px; border-radius: 12px; width: 33%; box-shadow: 0 4px 16px rgba(28,25,23,0.06);">
+          <p style="color: #D97706; font-family: 'Source Sans 3', sans-serif; font-weight: 600; margin: 0 0 6px 0; font-size: 14px;">♻️ Global Deduplication</p>
+          <p style="color: #57534E; font-family: 'Source Sans 3', sans-serif; font-size: 13px; margin: 0; line-height: 1.5;">Chunks are shared across images by hash. Base libraries are cached once globally.</p>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ================================================================
+     TAB 2: LIVE DEMO
+     ================================================================ -->
+  <div id="tab-demo" class="tab-content">
+    <div class="demo-layout">
+
+      <!-- LEFT: File tree -->
+      <div class="file-tree-panel">
+        <div class="file-tree-header">
+          <span class="icon">&#x1F4E6;</span> Image A &middot; File Tree
+        </div>
+        <div class="file-tree" id="fileTree">
+          <!-- Populated by JS -->
+        </div>
+      </div>
+
+      <!-- RIGHT: Controls + Stats -->
+      <div class="demo-right">
+
+        <!-- Explanation Box — Ember Studio surface card -->
+        <div style="background: #F5F5F4; border: 1px solid #D6D3D1; border-radius: 12px; padding: 16px 20px; text-align: left; box-shadow: 0 1px 3px rgba(28,25,23,0.06);">
+          <p style="margin: 0 0 10px 0; color: #1C1917; font-family: 'Playfair Display', serif; font-weight: 700; font-size: 15px;">How to use this demo</p>
+          <ul style="margin: 0; padding-left: 20px; color: #57534E; font-family: 'Source Sans 3', sans-serif; font-size: 14px; line-height: 1.6; list-style-type: disc;">
+            <li><strong style="color: #C2410C;">1. Eager Load:</strong> The traditional way. Downloads the <em>entire</em> container image before starting, even though most files aren't used.</li>
+            <li><strong style="color: #16A34A;">2. Lazy Load:</strong> Our new way. Starts instantly! Only downloads files exactly when the application actually needs them.</li>
+            <li><strong style="color: #D97706;">3. Warm Start:</strong> Running again or sharing files. No downloads needed because data is already locally cached.</li>
+          </ul>
+        </div>
+
+        <!-- Buttons -->
+        <div class="btn-row">
+          <button class="demo-btn eager" id="btnEager" onclick="runEager()">
+            <span class="btn-num">1</span>Eager Load
+          </button>
+          <button class="demo-btn lazy" id="btnLazy" onclick="runLazy()">
+            <span class="btn-num">2</span>Lazy Load
+          </button>
+          <button class="demo-btn warm" id="btnWarm" onclick="runWarm()">
+            <span class="btn-num">3</span>Warm Start
+          </button>
+          <button class="reset-btn" onclick="resetDemo()">&#x21bb; Reset Demo</button>
+        </div>
+
+        <!-- Network activity bar -->
+        <div class="network-bar-container">
+          <div class="network-bar-label">
+            <span class="pulse-dot" id="pulseDot"></span>
+            Network Activity
+          </div>
+          <div class="network-bar-track">
+            <div class="network-bar-fill" id="networkBar"></div>
+          </div>
+        </div>
+
+        <!-- Stats -->
+        <div class="stats-panel">
+          <div class="stats-header">
+            <span>&#x1F4CA;</span> Performance Metrics
+          </div>
+          <div class="stats-grid">
+            <div class="stat-cell">
+              <div class="stat-label">Time to Ready</div>
+              <div class="stat-value" id="statTime">&mdash;</div>
+            </div>
+            <div class="stat-cell">
+              <div class="stat-label">Network Transferred</div>
+              <div class="stat-value" id="statBytes">&mdash;</div>
+            </div>
+            <div class="stat-cell">
+              <div class="stat-label">Files Fetched</div>
+              <div class="stat-value" id="statFiles">&mdash;</div>
+            </div>
+            <div class="stat-cell">
+              <div class="stat-label">Cache Hit Rate</div>
+              <div class="stat-value" id="statCache">&mdash;</div>
+            </div>
+          </div>
+        </div>
+
+        <!-- Comparison callout (lazy) -->
+        <div class="callout" id="lazyCallout">
+          <span class="callout-icon">&#x26A1;</span>
+          <span>26.7x faster &middot; 97.7% less data transferred</span>
+        </div>
+
+        <!-- Cache callout (warm) -->
+        <div class="callout cache-callout" id="warmCallout">
+          <span class="callout-icon">&#x1F4BE;</span>
+          <span>Served from local cache &mdash; zero network round-trips</span>
+        </div>
+
+        <!-- Cross-image dedup panel -->
+        <div class="dedup-panel" id="dedupPanel">
+          <span class="dedup-icon">&#x1F517;</span>
+          <div class="dedup-text">
+            <strong>Image B</strong> reads a shared library already cached by Image A &rarr;
+            <span class="dedup-highlight">0 network bytes, 100% cache hit</span>.
+            Content-addressing makes chunks fungible across images.
+          </div>
+        </div>
+
+      </div>
+    </div>
+  </div>
+
+  <!-- ================================================================
+     JAVASCRIPT: All demo logic, animation, and state management.
+     Uses only vanilla JS, no dependencies.
+     ================================================================ -->
+  <script>
+    (function () {
+      'use strict';
+
+      /* ==================================================================
+         FILE TREE DATA
+         Mirrors the synthetic image from demo.py:
+           shared/lib_0.so .. lib_19.so   (20 shared base-layer files)
+           usr/share/doc/doc_0.dat .. doc_199.dat  (200 cold files)
+           app/hot_0.py .. hot_4.py       (5 hot application files)
+         Total: 225 files, of which only 6 are touched by the workload.
+         ================================================================== */
+
+      var sharedFiles = [];
+      for (var i = 0; i < 20; i++) {
+        sharedFiles.push({ path: 'shared/lib_' + i + '.so', group: 'shared', hot: false, cold: false });
+      }
+
+      var docFiles = [];
+      for (var i = 0; i < 200; i++) {
+        docFiles.push({ path: 'usr/share/doc/doc_' + i + '.dat', group: 'doc', hot: false, cold: true });
+      }
+
+      var hotFiles = [];
+      for (var i = 0; i < 5; i++) {
+        hotFiles.push({ path: 'app/hot_' + i + '.py', group: 'hot', hot: true, cold: false });
+      }
+
+      var allFiles = hotFiles.concat(sharedFiles).concat(docFiles);
+
+      /* ==================================================================
+         SCRIPTED BENCHMARK RESULTS (from real POC run — see design.md)
+         ================================================================== */
+
+      var RESULTS = {
+        eager: {
+          time: { value: 0.53, unit: 's', decimals: 2 },
+          bytes: { value: 35.3, unit: 'MB', decimals: 1 },
+          files: { value: 205, total: 205 },
+          cache: { value: 0, unit: '%', decimals: 0 },
+          duration: 1800
+        },
+        lazy: {
+          time: { value: 0.02, unit: 's', decimals: 2 },
+          bytes: { value: 832, unit: 'KB', decimals: 0 },
+          files: { value: 6, total: 205 },
+          cache: { value: 0, unit: '%', decimals: 0 },
+          duration: 1500
+        },
+        warm: {
+          time: { value: 0.001, unit: 's', decimals: 3 },
+          bytes: { value: 0, unit: 'KB', decimals: 0 },
+          files: { value: 6, total: 205 },
+          cache: { value: 100, unit: '%', decimals: 0 },
+          duration: 400
+        }
+      };
+
+      /* ==================================================================
+         STATE
+         ================================================================== */
+
+      var currentAnimation = null;
+      var demoState = 'idle';
+
+      /* ==================================================================
+         TAB SWITCHING
+         ================================================================== */
+
+      window.switchTab = function (tabName) {
+        var btns = document.querySelectorAll('.tab-btn');
+        for (var i = 0; i < btns.length; i++) {
+          btns[i].classList.toggle('active', (tabName === 'architecture' ? i === 0 : i === 1));
+        }
+        document.getElementById('tab-architecture').classList.toggle('active', tabName === 'architecture');
+        document.getElementById('tab-demo').classList.toggle('active', tabName === 'demo');
+      };
+
+      /* ==================================================================
+         FILE TREE RENDERING
+         ================================================================== */
+
+      function buildFileTree() {
+        var container = document.getElementById('fileTree');
+        container.innerHTML = '';
+
+        // Group: app (hot files) — shown FIRST so they're visible without scrolling
+        container.appendChild(createGroup('app/', hotFiles));
+
+        // Group: shared
+        container.appendChild(createGroup('shared/', sharedFiles));
+
+        // Group: doc (collapsed — show first 5 + summary row)
+        var docGroup = document.createElement('div');
+        docGroup.className = 'tree-group';
+        var docLabel = document.createElement('div');
+        docLabel.className = 'tree-group-label';
+        docLabel.textContent = 'usr/share/doc/';
+        docGroup.appendChild(docLabel);
+
+        for (var i = 0; i < docFiles.length; i++) {
+          var item = createTreeItem(docFiles[i]);
+          item.dataset.index = String(allFiles.indexOf(docFiles[i]));
+          if (i >= 5) item.style.display = 'none';
+          item.dataset.docHidden = i >= 5 ? 'true' : 'false';
+          docGroup.appendChild(item);
+        }
+
+        var moreRow = document.createElement('div');
+        moreRow.className = 'tree-item cold';
+        moreRow.id = 'docMoreRow';
+        moreRow.innerHTML = '<span class="file-icon"></span><span class="file-name" style="font-style:italic;">\u2026 and 195 more files</span>';
+        docGroup.appendChild(moreRow);
+        container.appendChild(docGroup);
+      }
+
+      function createGroup(label, files) {
+        var group = document.createElement('div');
+        group.className = 'tree-group';
+        var lbl = document.createElement('div');
+        lbl.className = 'tree-group-label';
+        lbl.textContent = label;
+        group.appendChild(lbl);
+        for (var i = 0; i < files.length; i++) {
+          var item = createTreeItem(files[i]);
+          item.dataset.index = String(allFiles.indexOf(files[i]));
+          group.appendChild(item);
+        }
+        return group;
+      }
+
+      function createTreeItem(file) {
+        var item = document.createElement('div');
+        item.className = 'tree-item' + (file.hot ? ' hot' : '') + (file.cold ? ' cold' : '');
+        item.id = 'file-' + file.path.replace(/[\/\.]/g, '-');
+        var icon = document.createElement('span');
+        icon.className = 'file-icon';
+        var name = document.createElement('span');
+        name.className = 'file-name';
+        name.textContent = file.path.split('/').pop();
+        item.appendChild(icon);
+        item.appendChild(name);
+        return item;
+      }
+
+      /* ==================================================================
+         TREE ANIMATION HELPERS
+         ================================================================== */
+
+      function setFileFetched(file) {
+        var id = 'file-' + file.path.replace(/[\/\.]/g, '-');
+        var el = document.getElementById(id);
+        if (el) {
+          el.className = 'tree-item fetched fetching';
+          setTimeout(function () { el.classList.remove('fetching'); }, 300);
+        }
+      }
+
+      function resetFileTree() {
+        for (var i = 0; i < allFiles.length; i++) {
+          var f = allFiles[i];
+          var id = 'file-' + f.path.replace(/[\/\.]/g, '-');
+          var el = document.getElementById(id);
+          if (el) {
+            el.className = 'tree-item' + (f.hot ? ' hot' : '') + (f.cold ? ' cold' : '');
+          }
+        }
+        var hiddenDocs = document.querySelectorAll('[data-doc-hidden="true"]');
+        for (var i = 0; i < hiddenDocs.length; i++) hiddenDocs[i].style.display = 'none';
+        var moreRow = document.getElementById('docMoreRow');
+        if (moreRow) {
+          moreRow.style.display = '';
+          moreRow.querySelector('.file-name').textContent = '\u2026 and 195 more files';
+          moreRow.className = 'tree-item cold';
+        }
+      }
+
+      /* ==================================================================
+         STAT ANIMATION — smooth counting with requestAnimationFrame
+         Uses cubic ease-out for a natural deceleration feel.
+         ================================================================== */
+
+      function animateStat(elementId, from, to, duration, formatFn) {
+        var el = document.getElementById(elementId);
+        var startTime = performance.now();
+
+        function tick(now) {
+          var elapsed = now - startTime;
+          var progress = Math.min(elapsed / duration, 1);
+          var eased = 1 - Math.pow(1 - progress, 3);
+          var current = from + (to - from) * eased;
+          el.innerHTML = formatFn(current, progress);
+          if (progress < 1) requestAnimationFrame(tick);
+        }
+        requestAnimationFrame(tick);
+      }
+
+      /* ==================================================================
+         NETWORK BAR
+         ================================================================== */
+
+      function animateNetworkBar(duration, isEager) {
+        var bar = document.getElementById('networkBar');
+        var dot = document.getElementById('pulseDot');
+        bar.style.width = '0%';
+        bar.className = 'network-bar-fill' + (isEager ? ' eager-fill' : '');
+        dot.classList.add('active');
+
+        var startTime = performance.now();
+        function tick(now) {
+          var progress = Math.min((now - startTime) / duration, 1);
+          bar.style.width = (progress * 100) + '%';
+          if (progress < 1) requestAnimationFrame(tick);
+          else dot.classList.remove('active');
+        }
+        requestAnimationFrame(tick);
+      }
+
+      function resetNetworkBar() {
+        var bar = document.getElementById('networkBar');
+        var dot = document.getElementById('pulseDot');
+        bar.style.width = '0%';
+        bar.className = 'network-bar-fill';
+        dot.classList.remove('active');
+      }
+
+      /* ==================================================================
+         BUTTON STATE MANAGEMENT
+         ================================================================== */
+
+      function disableAllButtons() {
+        var ids = ['btnEager', 'btnLazy', 'btnWarm'];
+        for (var i = 0; i < ids.length; i++) document.getElementById(ids[i]).disabled = true;
+      }
+
+      function enableAllButtons() {
+        var ids = ['btnEager', 'btnLazy', 'btnWarm'];
+        for (var i = 0; i < ids.length; i++) document.getElementById(ids[i]).disabled = false;
+      }
+
+      function setButtonRunning(id) { document.getElementById(id).classList.add('running'); }
+      function clearButtonRunning(id) { document.getElementById(id).classList.remove('running'); }
+
+      /* ==================================================================
+         HIDE CALLOUTS / PANELS
+         ================================================================== */
+
+      function hideCallouts() {
+        document.getElementById('lazyCallout').classList.remove('visible');
+        document.getElementById('warmCallout').classList.remove('visible');
+        document.getElementById('dedupPanel').classList.remove('visible');
+      }
+
+      /* ==================================================================
+         RESET STATS TO PLACEHOLDER
+         ================================================================== */
+
+      function resetStats() {
+        var ids = ['statTime', 'statBytes', 'statFiles', 'statCache'];
+        for (var i = 0; i < ids.length; i++) {
+          var el = document.getElementById(ids[i]);
+          el.innerHTML = '\u2014';
+          el.className = 'stat-value';
+        }
+      }
+
+      /* ==================================================================
+         DEMO SCENARIOS
+         ================================================================== */
+
+      // --- 1. EAGER LOAD ---
+      window.runEager = function () {
+        if (demoState === 'running') return;
+        demoState = 'running';
+        disableAllButtons();
+        setButtonRunning('btnEager');
+        hideCallouts();
+        resetFileTree();
+        resetStats();
+
+        var R = RESULTS.eager;
+        var dur = R.duration;
+
+        // Animate network bar (eager = red/orange)
+        animateNetworkBar(dur, true);
+
+        // Animate stats
+        animateStat('statTime', 0, R.time.value, dur, function (v) {
+          return v.toFixed(R.time.decimals) + '<span class="unit">' + R.time.unit + '</span>';
+        });
+        animateStat('statBytes', 0, R.bytes.value, dur, function (v) {
+          return v.toFixed(R.bytes.decimals) + '<span class="unit"> ' + R.bytes.unit + '</span>';
+        });
+        animateStat('statFiles', 0, R.files.value, dur, function (v) {
+          return Math.round(v) + '<span class="unit"> / ' + R.files.total + '</span>';
+        });
+        animateStat('statCache', 0, 0, dur, function () {
+          return '0<span class="unit">%</span>';
+        });
+
+        // Animate file tree: all 225 files light up in a wave
+        var totalFiles = allFiles.length;
+        var batchSize = 8;
+        var interval = dur / (totalFiles / batchSize);
+        var filesAnimated = 0;
+        var moreRow = document.getElementById('docMoreRow');
+
+        currentAnimation = setInterval(function () {
+          for (var b = 0; b < batchSize && filesAnimated < totalFiles; b++) {
+            var file = allFiles[filesAnimated];
+            if (file.group === 'doc') {
+              var docIdx = docFiles.indexOf(file);
+              if (docIdx >= 5 && moreRow) {
+                var remaining = 200 - docIdx - 1;
+                moreRow.querySelector('.file-name').textContent =
+                  remaining > 0 ? ('\u2026 and ' + remaining + ' more fetching\u2026') : '(all 200 fetched)';
+                moreRow.className = 'tree-item fetched';
+              }
+            }
+            setFileFetched(file);
+            filesAnimated++;
+          }
+
+          if (filesAnimated >= totalFiles) {
+            clearInterval(currentAnimation);
+            currentAnimation = null;
+            document.getElementById('statTime').classList.add('highlight-red');
+            document.getElementById('statBytes').classList.add('highlight-red');
+            clearButtonRunning('btnEager');
+            demoState = 'done';
+            enableAllButtons();
+          }
+        }, interval);
+      };
+
+      // --- 2. LAZY LOAD ---
+      window.runLazy = function () {
+        if (demoState === 'running') return;
+        demoState = 'running';
+        disableAllButtons();
+        setButtonRunning('btnLazy');
+        hideCallouts();
+        resetFileTree();
+        resetStats();
+
+        var R = RESULTS.lazy;
+        var dur = R.duration;
+
+        animateNetworkBar(dur, false);
+
+        animateStat('statTime', 0, R.time.value, dur, function (v) {
+          return v.toFixed(R.time.decimals) + '<span class="unit">' + R.time.unit + '</span>';
+        });
+        animateStat('statBytes', 0, R.bytes.value, dur, function (v) {
+          return Math.round(v) + '<span class="unit"> ' + R.bytes.unit + '</span>';
+        });
+        animateStat('statFiles', 0, R.files.value, dur, function (v) {
+          return Math.round(v) + '<span class="unit"> / ' + R.files.total + '</span>';
+        });
+        animateStat('statCache', 0, 0, dur, function () {
+          return '0<span class="unit">%</span>';
+        });
+
+        // Only 6 files light up: 5 hot + 1 shared
+        var lazyFiles = hotFiles.concat([sharedFiles[0]]);
+        var interval = dur / lazyFiles.length;
+        var idx = 0;
+
+        currentAnimation = setInterval(function () {
+          if (idx < lazyFiles.length) {
+            setFileFetched(lazyFiles[idx]);
+            idx++;
+          }
+          if (idx >= lazyFiles.length) {
+            clearInterval(currentAnimation);
+            currentAnimation = null;
+            document.getElementById('statTime').classList.add('highlight-green');
+            document.getElementById('statBytes').classList.add('highlight-green');
+            setTimeout(function () {
+              document.getElementById('lazyCallout').classList.add('visible');
+            }, 300);
+            clearButtonRunning('btnLazy');
+            demoState = 'done';
+            enableAllButtons();
+          }
+        }, interval);
+      };
+
+      // --- 3. WARM START ---
+      window.runWarm = function () {
+        if (demoState === 'running') return;
+        demoState = 'running';
+        disableAllButtons();
+        setButtonRunning('btnWarm');
+        hideCallouts();
+        resetFileTree();
+
+        var R = RESULTS.warm;
+        var dur = R.duration;
+
+        // NO network bar activity
+        resetNetworkBar();
+
+        // Fast stats animation
+        animateStat('statTime', 0, R.time.value, dur, function (v, p) {
+          if (p >= 0.9) return '<1<span class="unit">ms</span>';
+          return (v * 1000).toFixed(1) + '<span class="unit">ms</span>';
+        });
+        animateStat('statBytes', 0, 0, dur, function () {
+          return '0<span class="unit"> KB</span>';
+        });
+        animateStat('statFiles', 0, R.files.value, dur, function (v) {
+          return Math.round(v) + '<span class="unit"> / ' + R.files.total + '</span>';
+        });
+        animateStat('statCache', 0, R.cache.value, dur, function (v) {
+          return Math.round(v) + '<span class="unit">%</span>';
+        });
+
+        // Snap cached files to green almost instantly
+        var cachedFiles = hotFiles.concat([sharedFiles[0]]);
+        for (var i = 0; i < cachedFiles.length; i++) {
+          (function (file, delay) {
+            setTimeout(function () { setFileFetched(file); }, delay);
+          })(cachedFiles[i], i * 40);
+        }
+
+        setTimeout(function () {
+          document.getElementById('statTime').classList.add('highlight-blue');
+          document.getElementById('statCache').classList.add('highlight-blue');
+          document.getElementById('warmCallout').classList.add('visible');
+          setTimeout(function () {
+            document.getElementById('dedupPanel').classList.add('visible');
+          }, 500);
+          clearButtonRunning('btnWarm');
+          demoState = 'done';
+          enableAllButtons();
+        }, dur + 100);
+      };
+
+      // --- RESET ---
+      window.resetDemo = function () {
+        if (currentAnimation) {
+          clearInterval(currentAnimation);
+          currentAnimation = null;
+        }
+        demoState = 'idle';
+        resetFileTree();
+        resetStats();
+        resetNetworkBar();
+        hideCallouts();
+        enableAllButtons();
+        clearButtonRunning('btnEager');
+        clearButtonRunning('btnLazy');
+        clearButtonRunning('btnWarm');
+      };
+
+      /* ==================================================================
+         INIT — build the file tree on page load
+         ================================================================== */
+      buildFileTree();
+
+    })();
+  </script>
+
+</body>
+
+</html>
